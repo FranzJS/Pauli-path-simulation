@@ -5,14 +5,16 @@ A modular C++20 benchmark comparing simulation methods on two entangling circuit
 - random 1D Clifford+T brickwork: 14 qubits, 12 layers, T density 0.70
 - Trotterized nonintegrable Ising dynamics: 16 qubits, 5 steps
 
-Circuit definitions are separate from simulation methods in `src/v1_circuits.cpp` and `src/v1_methods.cpp`.
+Circuit definitions are separate from simulation methods.
 
 ## Methods
 
 - dense state-vector reference
-- exact sparse Heisenberg Pauli propagation
-- exhaustive depth-first Pauli-path enumeration
-- importance-sampled Monte Carlo Pauli paths
+- exact sparse BFS propagation
+- BFS with per-layer relative L1-mass truncation (discard at most 1e-4 of each layer's L1 coefficient mass)
+- BFS with top-coefficient memory caps of 2, 4, and 8 MB
+- exhaustive DFS path enumeration
+- importance-sampled Monte Carlo paths
 
 ## Build and run
 
@@ -22,4 +24,4 @@ cmake --build build -j
 ./build/pauli_benchmark 25
 ```
 
-The argument is the time budget in seconds per method and case. The current benchmark records runtime, estimated algorithmic memory, and absolute error. Results are written to `results/benchmark_v1.csv`. DFS reaches the time cap on both pushed cases; exact sparse finishes with about 14 MB estimated frontier memory. The memory figures are representation-based estimates, not measured process RSS.
+Results are written to `results/benchmark_truncated.csv`. Memory figures are representation-based algorithmic estimates, not measured process RSS.
