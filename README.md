@@ -24,4 +24,4 @@ cmake --build build -j
 ./build/pauli_benchmark 25
 ```
 
-Results are written to `results/benchmark_truncated.csv`. Memory figures are representation-based algorithmic estimates, not measured process RSS.
+Results are written to `results/benchmark_truncated.csv`. Memory figures are representation-based algorithmic estimates, not measured process RSS. Timed-out DFS partial sums are intentionally recorded as missing estimates.
