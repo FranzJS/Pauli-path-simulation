@@ -1,0 +1,41 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{booktabs,longtable,amsmath,hyperref}
+\title{Benchmark 0: Scaling Decomposition for Pauli-Path Simulation}
+\author{Pauli path propagation simulation project}
+\date{July 2026}
+\begin{document}\maketitle
+\section{Purpose and design}
+The implementation separates circuit families from simulation algorithms. Every method consumes the same gate list. The initial circuit family applies $H R_z(\theta)H=R_x(\theta)$ independently to $k$ active qubits in an $n$-qubit register and measures $Z_0Z_1\cdots Z_{k-1}$ on $|0^n\rangle$. Its analytic reference is $\cos^k\theta$. The family is intentionally collision-free, providing a controlled stress test of branching, memory, and Monte Carlo variance.
+
+Each method-case pair has a 25-second safety budget. The standard run also uses finite guards: 500,000 active terms for exact sparse propagation and one million Monte Carlo paths.
+\section{Methods}
+The methods are dense state-vector evolution, exact sparse Heisenberg Pauli propagation with hash-map merging, exhaustive depth-first path enumeration, and coefficient-magnitude importance-sampled Monte Carlo.
+\section{Representative measurements}
+\small
+\begin{longtable}{lllrrrr}
+\toprule Suite & Case & Method & Time (s) & Estimate & Reference & Scale\\\midrule\endhead
+width & $n=12,k=12$ & exact sparse & 0.00194 & 0.3867 & 0.3867 & 4096\\
+width & $n=12,k=12$ & state vector & 0.000117 & 0.3867 & 0.3867 & 4096\\
+width & $n=64,k=12$ & exact sparse & 0.000784 & 0.3867 & 0.3867 & 4096\\
+branching & $n=24,k=18$ & exact sparse & 0.2165 & 0.001953 & 0.001953 & 262144\\
+branching & $n=24,k=18$ & DFS & 0.00544 & 0.001953 & 0.001953 & 262144\\
+branching & $n=24,k=18$ & Monte Carlo & 0.4755 & 0.001024 & 0.001953 & $10^6$\\
+branching & $n=24,k=20$ & exact sparse & 0.2244 & stopped & 0.0009766 & 524288\\
+branching & $n=24,k=20$ & DFS & 0.0203 & 0.0009766 & 0.0009766 & 1048576\\
+branching & $n=24,k=22$ & DFS & 0.0854 & 0.0004883 & 0.0004883 & 4194304\\
+variance & $k=18,\theta=0.05$ & Monte Carlo & 0.291 & 0.977708 & 0.977742 & $10^6$\\
+variance & $k=18,\theta=\pi/4$ & Monte Carlo & 0.503 & 0.001024 & 0.001953 & $10^6$\\
+\bottomrule
+\end{longtable}
+\section{Interpretation}
+With $k=12$ fixed, increasing $n$ from 12 to 64 produced no material runtime increase in the Pauli-path methods because the additional qubits were inactive. By contrast, exact sparse storage followed the designed $2^k$ growth and reached the 500,000-term guard at $k=20$.
+
+DFS also followed $2^k$ paths but was faster on this collision-free family because it avoided hash-table insertion and frontier storage. This result should not be generalized to circuits with substantial path collisions, where merging can reverse the comparison.
+
+Monte Carlo retained fixed memory, but at $\theta=\pi/4$ the signal $2^{-k/2}$ becomes exponentially small while path-weight variance remains large. At $k=18$, one million samples had absolute error of order $10^{-3}$, comparable to the reference value $1.95\times10^{-3}$. Small-angle cases were much better conditioned. The benchmark therefore isolates the two primary hazards: exponential exact frontier/path growth and Monte Carlo variance growth.
+\section{Limitations and next benchmark}
+The tensor-product family is analytically transparent but omits Clifford scrambling and path collisions. A subsequent family should add local entangling layers while preserving the same circuit and method interfaces. The reported timings are machine- and compiler-dependent and should be treated as a baseline rather than universal performance claims.
+\section{Repository format}
+Markdown is best for the durable project overview because it is immediately readable on GitHub and mobile devices. TeX and PDF are appropriate for formal reports with equations and tables. CSV should remain the source of truth for benchmark data.
+\end{document}
