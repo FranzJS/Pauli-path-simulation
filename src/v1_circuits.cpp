@@ -19,5 +19,5 @@ Circuit make_nonintegrable_ising(int n,int steps,double dt,double J,double hx,do
  }
  return c;
 }
-std::vector<Circuit> benchmark_circuits(){ return {make_clifford_t_brickwork(14,12,0.60,20260715), make_nonintegrable_ising(14,4,0.12,1.0,0.91,0.37)}; }
+std::vector<Circuit> benchmark_circuits(){ return {make_clifford_t_brickwork(14,12,0.70,20260715), make_nonintegrable_ising(16,5,0.12,1.0,0.91,0.37)}; }
 }
