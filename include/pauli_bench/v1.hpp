@@ -13,7 +13,4 @@ Circuit make_clifford_t_brickwork(int n,int layers,double t_density,std::uint64_
 Circuit make_nonintegrable_ising(int n,int steps,double dt,double J,double hx,double hz);
 std::vector<Circuit> benchmark_circuits();
 Result run_statevector(const Circuit&,double);
-Result run_exact_sparse(const Circuit&,double,std::uint64_t cap=1500000);
-Result run_dfs(const Circuit&,double,std::uint64_t cap=500000000);
-Result run_monte_carlo(const Circuit&,double,std::uint64_t samples=100000,std::uint64_t seed=123);
 }
