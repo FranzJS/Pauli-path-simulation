@@ -22,4 +22,4 @@ cmake --build build -j
 ./build/pauli_benchmark 25
 ```
 
-The argument is the time budget in seconds per method and case. The current benchmark records runtime, estimated memory, and absolute error. Results are written to `results/benchmark_v1.csv`. DFS reaches the time cap on both pushed cases; exact sparse finishes with about 14 MB estimated frontier memory.
+The argument is the time budget in seconds per method and case. The current benchmark records runtime, estimated algorithmic memory, and absolute error. Results are written to `results/benchmark_v1.csv`. DFS reaches the time cap on both pushed cases; exact sparse finishes with about 14 MB estimated frontier memory. The memory figures are representation-based estimates, not measured process RSS.
