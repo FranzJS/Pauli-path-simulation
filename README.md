@@ -1,27 +1,21 @@
-# Pauli-path simulation benchmarks
+# Pauli-path simulation benchmark
 
-A modular C++20 benchmark comparing simulation methods on two entangling circuit families:
-
-- random 1D Clifford+T brickwork: 14 qubits, 12 layers, T density 0.70
-- Trotterized nonintegrable Ising dynamics: 16 qubits, 5 steps
-
-Circuit definitions are separate from simulation methods.
-
-## Methods
+The active benchmark now compares only:
 
 - dense state-vector reference
-- exact sparse BFS propagation
-- BFS with per-layer relative L1-mass truncation (discard at most 1e-4 of each layer's L1 coefficient mass)
-- BFS with top-coefficient memory caps of 2, 4, and 8 MB
-- exhaustive DFS path enumeration
-- importance-sampled Monte Carlo paths
+- breadth-first Pauli propagation with a per-layer relative L1-mass cutoff of `1e-4`
 
-## Build and run
+Both retained circuit families use 21 qubits:
+
+- random 1D Clifford+T brickwork: 12 layers, T density 0.70
+- Trotterized nonintegrable Ising dynamics: 5 steps
+
+At 21 qubits, the state vector contains `2^21` complex doubles and uses 32 MB, crossing the benchmark's 20 MB stopping threshold.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/pauli_benchmark 25
+./build/pauli_benchmark 120
 ```
 
-Results are written to `results/benchmark_truncated.csv`. Memory figures are representation-based algorithmic estimates, not measured process RSS. Timed-out DFS partial sums are intentionally recorded as missing estimates.
+The argument is the L1-BFS timeout in seconds per circuit. Results are recorded in `results/benchmark_retained.csv`. Memory figures for BFS are representation-based frontier estimates; state-vector memory is the raw amplitude-array size.
