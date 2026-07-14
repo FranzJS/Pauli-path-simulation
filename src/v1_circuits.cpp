@@ -13,5 +13,5 @@ Circuit make_nonintegrable_ising(int n,int steps,double dt,double J,double hx,do
  for(int s=0;s<steps;++s){for(int q=0;q+1<n;++q){c.gates.push_back({GateKind::CNOT,q,q+1,0});c.gates.push_back({GateKind::RZ,q+1,0,2*J*dt});c.gates.push_back({GateKind::CNOT,q,q+1,0});}for(int q=0;q<n;++q){c.gates.push_back({GateKind::H,q,0,0});c.gates.push_back({GateKind::RZ,q,0,2*hx*dt});c.gates.push_back({GateKind::H,q,0,0});c.gates.push_back({GateKind::RZ,q,0,2*hz*dt});}}
  return c;
 }
-std::vector<Circuit> benchmark_circuits(){return {make_clifford_t_brickwork(21,12,0.70,20260715),make_nonintegrable_ising(21,5,0.12,1.0,0.91,0.37)};}
+std::vector<Circuit> benchmark_circuits(){return {make_clifford_t_brickwork(21,12,0.70,20260715),make_nonintegrable_ising(21,12,0.12,1.0,0.91,0.37)};}
 }
