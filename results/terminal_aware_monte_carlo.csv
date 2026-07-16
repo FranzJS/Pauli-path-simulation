@@ -1,0 +1,4 @@
+family,case,runtime_s,samples,estimate,std_error,abs_error,reference,estimated_memory_mb,extrapolated_seconds_to_4.7e-4_se
+clifford_t,ct_n20_d12,10.0,644815,1.06033,0.530182,0.730806,0.329520762689497,0.001,12724896.02
+ising,ising_n20_s12,10.0,365820,-34.4846,28.7323,35.1988,0.714108793456576,0.001,37371890597.10
+clifford_t_depol,ct_depol_n20_d12,10.0,572127,0.0699019,0.015657,0.0035802,0.0663217307060528,0.001,11097.40
