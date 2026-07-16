@@ -1,20 +1,21 @@
-# Pauli-path simulation benchmarks
+# Pauli-path simulation benchmark
 
-A modular C++20 benchmark for comparing circuit simulation methods. Circuit families are defined independently in `src/circuits.cpp`; simulation methods are implemented in `src/methods.cpp`.
+Stable benchmark v1 compares dense state-vector references and L1-truncated breadth-first Pauli propagation.
 
-## Methods
+## Fixed cases
 
-- dense state-vector reference
-- exact sparse Heisenberg Pauli propagation
-- exhaustive depth-first Pauli-path enumeration
-- importance-sampled Monte Carlo Pauli paths
+All cases use 20 qubits. L1 pruning occurs after every four non-Clifford `RZ` gates.
 
-## Build and run
+- Clifford+T: 12 brickwork layers, T density 0.70, seed 20260715, observable `X7 Z8 X9 X10`, cutoff 0.00625.
+- Nonintegrable Ising: 12 Trotter steps, dt 0.12, J 1.0, hx 0.91, hz 0.37, observable `Z9 Z10`, cutoff 0.00005.
+- Noisy Clifford+T: matched Clifford+T circuit with single-qubit depolarizing noise p=0.05 after each layer, observable `X7 Z8 X9 X10`, cutoff 0.034.
+
+The cutoffs target absolute errors in the mid-10^-4 range.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/pauli_benchmark 25
+./build/pauli_benchmark 120
 ```
 
-The argument is the time budget in seconds **per method and case**. Results are written to `results/benchmark.csv`. The formal report source is in `report/benchmark_report.tex`; `report/summary.md` provides a browsable repository summary. The compiled PDF can be regenerated with `pdflatex`.
+Results are written to `results/benchmark_final.csv`. BFS memory is an algorithmic estimate based on 48 bytes per peak map term, not measured process RSS; transient allocator overhead may be higher.

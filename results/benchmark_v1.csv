@@ -1,0 +1,5 @@
+family,case,method,status,runtime_s,memory_mb,error,estimate,reference
+clifford_t,ct_n21_d12,statevector,ok,1.144096967,32,0,-0.013967709472004,-0.013967709472004
+clifford_t,ct_n21_d12,bfs_l1_1e-4,external_time_cap,120,nan,nan,nan,-0.013967709472004
+ising,ising_n21_s5,statevector,ok,1.295946878,32,0,0.697141917486145,0.697141917486145
+ising,ising_n21_s5,bfs_l1_1e-4,ok,0.00362144,0.00961304,0.002641917486145,0.6945,0.697141917486145
