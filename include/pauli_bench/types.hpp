@@ -1,32 +1,69 @@
 #pragma once
+
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace pb {
-enum class GateKind { H, CNOT, RZ };
-struct Gate { GateKind kind; int q0; int q1; double theta; };
-struct Circuit {
- std::string name;
- int n;
- std::uint64_t observable_z_mask;
- std::vector<Gate> gates;
- int rz_count;
- double theta;
- double reference_value;
+namespace pauli_bench {
+
+enum class GateKind : std::uint8_t { H, S, CNOT, RZ, Depolarizing };
+
+struct Gate {
+    GateKind kind{};
+    std::uint8_t q0{};
+    std::uint8_t q1{};
+    double parameter{};
+    double cos_parameter{1.0};
+    double sin_parameter{0.0};
+
+    static Gate h(int q);
+    static Gate s(int q);
+    static Gate cnot(int control, int target);
+    static Gate rz(int q, double theta);
+    static Gate depolarizing(int q, double probability);
 };
-struct Pauli { std::uint64_t x{0}, z{0}; bool operator==(const Pauli&) const = default; };
+
+struct Pauli {
+    std::uint64_t x{};
+    std::uint64_t z{};
+
+    friend bool operator==(const Pauli&, const Pauli&) = default;
+};
+
 struct PauliHash {
- std::size_t operator()(const Pauli& p) const noexcept {
-  auto h=p.x*0x9E3779B185EBCA87ULL;
-  h^=p.z+0x9E3779B97F4A7C15ULL+(h<<6)+(h>>2);
-  return static_cast<std::size_t>(h);
- }
+    std::size_t operator()(const Pauli& p) const noexcept;
 };
-struct Result {
- std::string suite, case_name, method, status;
- int n{0}, depth{0}, rz_count{0};
- double theta{0}, seconds{0}, estimate{0}, exact_value{0}, abs_error{0}, std_error{0}, variance{0};
- std::uint64_t samples{0}, generated{0}, peak_terms{0}, terminal_paths{0};
+
+struct Term {
+    Pauli pauli{};
+    double coefficient{};
 };
-}
+
+using Frontier = std::vector<Term>;
+
+struct Circuit {
+    std::string family;
+    std::string name;
+    int qubits{};
+    Pauli observable{};
+    std::vector<Gate> gates;
+    double l1_cutoff{};
+    double reference{};
+    std::string reference_method;
+};
+
+struct BfsDiagnostics {
+    double estimate{};
+    double error{};
+    double runtime_seconds{};
+    std::uint64_t peak_support_terms{};
+    std::uint64_t peak_pre_truncation_terms{};
+    std::uint64_t peak_post_truncation_terms{};
+    std::uint64_t truncation_events{};
+    std::uint64_t peak_vector_capacity_terms{};
+    std::uint64_t peak_merge_entries{};
+    std::uint64_t peak_merge_capacity_slots{};
+};
+
+}  // namespace pauli_bench
