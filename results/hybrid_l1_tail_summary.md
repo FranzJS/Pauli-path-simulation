@@ -50,4 +50,4 @@ No ten-pass Ising result is reported because the first pass did not complete wit
 
 ## Reproduction
 
-Build the branch in Release mode, then use the one-pass executable from a fresh process for each seed. The committed raw CSV contains all 60 completed randomized passes and the three Ising safety-stop rows. The cumulative CSV records the running mean and error after every pass.
+Build the branch in Release mode, then run `benchmarks/run_hybrid_tail.py` so every pass uses a fresh process. The committed single-pass and cumulative CSVs contain the reported comparisons and running error trajectories; the runner also emits a raw per-pass CSV.
