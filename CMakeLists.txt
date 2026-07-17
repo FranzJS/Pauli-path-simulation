@@ -12,6 +12,8 @@ add_library(pauli_bench
     src/kernel.cpp
     src/circuits.cpp
     src/bfs.cpp
+    src/truncation.cpp
+    src/hybrid.cpp
     src/reference.cpp)
 
 target_include_directories(pauli_bench PUBLIC include)
@@ -23,6 +25,9 @@ endif()
 
 add_executable(pauli_benchmark benchmarks/main.cpp)
 target_link_libraries(pauli_benchmark PRIVATE pauli_bench)
+
+add_executable(pauli_magnitude_pps_benchmark benchmarks/magnitude_pps_main.cpp)
+target_link_libraries(pauli_magnitude_pps_benchmark PRIVATE pauli_bench)
 
 include(CTest)
 if(BUILD_TESTING)

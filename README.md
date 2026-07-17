@@ -54,3 +54,37 @@ The committed CSV was produced on a 56-core x86_64 virtual machine using GCC 14.
 | Noisy Clifford+T | 0.0136 s | 9.59 MB | 4.62e-4 |
 
 The canonical kernel is substantially faster than the previous node-based implementation while preserving the benchmark definition. The exact retained support can differ slightly from older runs because truncation ties are now broken deterministically by the Pauli key.
+
+## Magnitude PPS with Horvitz--Thompson correction
+
+The second simulator first runs deterministic L1 truncation once to record the
+retained support budget `K` at every truncation event. An independent randomized
+pass then samples exactly `K` coordinates from the entire frontier using
+
+```text
+pi_i = min(1, |c_i| / tau),  with  sum_i pi_i = K.
+```
+
+Coordinates with `pi_i = 1` are deterministic heavy hitters. The remaining
+coordinates are drawn by fixed-size systematic probability-proportional-to-size
+sampling and selected coefficients receive the Horvitz--Thompson factor
+`1 / pi_i`. Thus every truncation, and therefore every complete pass, is
+unbiased while matching the deterministic BFS support schedule.
+
+Reproduce the single-pass and progressive comparisons with:
+
+```bash
+./scripts/run_optimal_pps_benchmark.py \
+  build-native 5 \
+  results/optimal_pps_single_pass.csv \
+  results/optimal_pps_100_pass.csv \
+  100
+```
+
+The committed outputs include the
+[single-pass comparison](results/optimal_pps_single_pass.csv),
+[20-pass trajectories](results/optimal_pps_20_pass.csv),
+[100-pass trajectories](results/optimal_pps_100_pass.csv), and a concise
+[benchmark report](results/optimal_pps_report.md). Randomized passes are
+independent and can be executed in parallel; their estimates are averaged only
+after all passes complete.

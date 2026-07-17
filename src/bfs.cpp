@@ -1,6 +1,7 @@
 #include "pauli_bench/bfs.hpp"
 
 #include "pauli_bench/kernel.hpp"
+#include "pauli_bench/truncation.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -11,59 +12,6 @@ namespace pauli_bench {
 namespace {
 
 using Clock = std::chrono::steady_clock;
-
-std::size_t truncate_l1_mass(Frontier& frontier, double cutoff_fraction) {
-    if (frontier.empty() || cutoff_fraction <= 0.0) {
-        return 0;
-    }
-
-    double l1_mass = 0.0;
-    for (const auto& term : frontier) {
-        l1_mass += std::abs(term.coefficient);
-    }
-
-    const double removal_budget = cutoff_fraction * l1_mass;
-    if (removal_budget <= 0.0) {
-        return 0;
-    }
-
-    std::sort(
-        frontier.begin(),
-        frontier.end(),
-        [](const Term& lhs, const Term& rhs) {
-            const double lhs_magnitude = std::abs(lhs.coefficient);
-            const double rhs_magnitude = std::abs(rhs.coefficient);
-            if (lhs_magnitude != rhs_magnitude) {
-                return lhs_magnitude < rhs_magnitude;
-            }
-            if (lhs.pauli.x != rhs.pauli.x) {
-                return lhs.pauli.x < rhs.pauli.x;
-            }
-            return lhs.pauli.z < rhs.pauli.z;
-        });
-
-    double removed_mass = 0.0;
-    std::size_t removed_terms = 0;
-    while (removed_terms < frontier.size()) {
-        const double next_mass = std::abs(frontier[removed_terms].coefficient);
-        if (removed_mass + next_mass > removal_budget) {
-            break;
-        }
-        removed_mass += next_mass;
-        ++removed_terms;
-    }
-
-    if (removed_terms == 0) {
-        return 0;
-    }
-
-    std::move(
-        frontier.begin() + static_cast<std::ptrdiff_t>(removed_terms),
-        frontier.end(),
-        frontier.begin());
-    frontier.resize(frontier.size() - removed_terms);
-    return removed_terms;
-}
 
 double terminal_expectation(const Frontier& frontier) {
     double result = 0.0;
@@ -86,7 +34,10 @@ void update_common_peaks(BfsDiagnostics& diagnostics, const Frontier& frontier) 
 
 }  // namespace
 
-BfsDiagnostics run_bfs_l1_truncated(const Circuit& circuit, int rz_interval) {
+BfsDiagnostics run_bfs_l1_truncated(
+    const Circuit& circuit,
+    int rz_interval,
+    std::vector<std::size_t>* retained_schedule) {
     BfsDiagnostics diagnostics;
     PauliKernel kernel;
     Frontier frontier;
@@ -119,6 +70,9 @@ BfsDiagnostics run_bfs_l1_truncated(const Circuit& circuit, int rz_interval) {
                 diagnostics.peak_pre_truncation_terms,
                 frontier.size());
             truncate_l1_mass(frontier, circuit.l1_cutoff);
+            if (retained_schedule != nullptr) {
+                retained_schedule->push_back(frontier.size());
+            }
             diagnostics.peak_post_truncation_terms = std::max<std::uint64_t>(
                 diagnostics.peak_post_truncation_terms,
                 frontier.size());
@@ -132,6 +86,9 @@ BfsDiagnostics run_bfs_l1_truncated(const Circuit& circuit, int rz_interval) {
             diagnostics.peak_pre_truncation_terms,
             frontier.size());
         truncate_l1_mass(frontier, circuit.l1_cutoff);
+        if (retained_schedule != nullptr) {
+            retained_schedule->push_back(frontier.size());
+        }
         diagnostics.peak_post_truncation_terms = std::max<std::uint64_t>(
             diagnostics.peak_post_truncation_terms,
             frontier.size());
