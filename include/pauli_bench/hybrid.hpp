@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pauli_bench/truncation.hpp"
 #include "pauli_bench/types.hpp"
 
 #include <cstddef>
@@ -35,10 +36,27 @@ HybridTruncationStats truncate_l1_optimal_pps_ht(
     std::size_t target_total_terms,
     std::mt19937_64& rng);
 
+HybridDiagnostics run_optimal_pps_ht(
+    const Circuit& circuit,
+    std::uint64_t seed,
+    const KStrategyConfig& k_strategy,
+    int rz_interval = 4);
+
 HybridDiagnostics run_l1_optimal_pps_ht(
     const Circuit& circuit,
     std::uint64_t seed,
     const std::vector<std::size_t>& retained_schedule,
+    int rz_interval = 4);
+
+// At each truncation event choose
+//   K = min(maximum_support, count(|coefficient| >= minimum_magnitude))
+// from the randomized pass's current frontier, then apply the same whole-
+// frontier PPS/HT sampler used by the scheduled method.
+HybridDiagnostics run_l1_optimal_pps_ht_support_budget(
+    const Circuit& circuit,
+    std::uint64_t seed,
+    std::size_t maximum_support,
+    double minimum_magnitude,
     int rz_interval = 4);
 
 }  // namespace pauli_bench

@@ -29,6 +29,9 @@ target_link_libraries(pauli_benchmark PRIVATE pauli_bench)
 add_executable(pauli_magnitude_pps_benchmark benchmarks/magnitude_pps_main.cpp)
 target_link_libraries(pauli_magnitude_pps_benchmark PRIVATE pauli_bench)
 
+add_executable(pauli_frontier_spectrum benchmarks/frontier_spectrum_main.cpp)
+target_link_libraries(pauli_frontier_spectrum PRIVATE pauli_bench)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(pauli_kernel_tests tests/test_kernel.cpp)

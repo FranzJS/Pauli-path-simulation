@@ -13,8 +13,11 @@ RAW_COLUMNS = [
     "family",
     "case",
     "method",
+    "truncation_strategy",
     "qubits",
     "l1_cutoff",
+    "maximum_support",
+    "minimum_magnitude",
     "estimate",
     "reference",
     "reference_method",
@@ -33,8 +36,11 @@ OUTPUT_COLUMNS = [
     "family",
     "case",
     "method",
+    "truncation_strategy",
     "qubits",
     "l1_cutoff",
+    "maximum_support",
+    "minimum_magnitude",
     "estimate",
     "reference",
     "reference_method",
@@ -53,15 +59,31 @@ OUTPUT_COLUMNS = [
     "peak_merge_capacity_slots",
 ]
 
+# Explicitly reproduce the three historical fixed benchmark configurations.
+# The C++ executable is now general and accepts these parameters directly.
+CASES = [
+    (20, 12, "clifford_t", 0.00625),
+    (20, 12, "ising", 0.00005),
+    (20, 12, "clifford_t_depol", 0.034),
+]
 
-def run_once(executable: Path, case_index: int) -> dict[str, str]:
+
+def run_once(
+    executable: Path,
+    configuration: tuple[int, int, str, float],
+) -> dict[str, str]:
+    qubits, layers, model, l1_cutoff = configuration
     completed = subprocess.run(
         [
             "/usr/bin/time",
             "-f",
             "__MAX_RSS_KB__=%M",
             str(executable),
-            str(case_index),
+            str(qubits),
+            str(layers),
+            model,
+            "l1",
+            str(l1_cutoff),
         ],
         check=True,
         capture_output=True,
@@ -93,8 +115,10 @@ def main() -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
 
-    for case_index in range(3):
-        runs = [run_once(executable, case_index) for _ in range(repetitions)]
+    for case_index, configuration in enumerate(CASES):
+        runs = [
+            run_once(executable, configuration) for _ in range(repetitions)
+        ]
         first = runs[0]
         runtimes = [float(run["runtime_s"]) for run in runs]
         rss_values = [float(run["peak_rss_mb"]) for run in runs]

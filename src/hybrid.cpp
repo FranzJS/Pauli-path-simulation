@@ -163,6 +163,9 @@ PpsSample sample_fixed_size_pps(
         if (std::abs(drift) <= 1e-14L) {
             break;
         }
+        if (sample.inclusion_probability[index] == 1.0L) {
+            continue;
+        }
         const long double room = drift > 0.0L
                                      ? 1.0L - sample.inclusion_probability[index]
                                      : sample.inclusion_probability[index];
@@ -179,6 +182,9 @@ PpsSample sample_fixed_size_pps(
     drift = static_cast<long double>(sample_terms) - probability_sum;
     if (drift != 0.0L) {
         for (const auto index : order) {
+            if (sample.inclusion_probability[index] == 1.0L) {
+                continue;
+            }
             const long double adjusted =
                 sample.inclusion_probability[index] + drift;
             if (adjusted >= 0.0L && adjusted <= 1.0L) {
@@ -192,17 +198,31 @@ PpsSample sample_fixed_size_pps(
         throw std::runtime_error("failed to normalize PPS inclusion probabilities");
     }
 
+    // Select saturated coordinates explicitly. Besides avoiding needless work,
+    // this prevents accumulated systematic-sampling roundoff from dropping a
+    // coordinate whose mathematical inclusion probability is exactly one.
     long double point = std::generate_canonical<
         long double,
         std::numeric_limits<long double>::digits>(rng);
     long double cumulative = 0.0L;
-    std::size_t selected_count = 0;
-    for (std::size_t position = 0; position < order.size(); ++position) {
-        const auto index = order[position];
-        const long double next = position + 1 == order.size()
-                                     ? static_cast<long double>(sample_terms)
-                                     : cumulative +
-                                           sample.inclusion_probability[index];
+    std::size_t selected_count = saturated;
+    for (std::size_t position = unsaturated;
+         position < population_terms;
+         ++position) {
+        sample.selected[ranked_index(position)] = true;
+    }
+    std::vector<std::size_t> sampling_order;
+    sampling_order.reserve(unsaturated);
+    for (const auto index : order) {
+        if (!sample.selected[index]) {
+            sampling_order.push_back(index);
+        }
+    }
+    for (std::size_t position = 0; position < sampling_order.size(); ++position) {
+        const auto index = sampling_order[position];
+        const long double next = position + 1 == sampling_order.size()
+                                     ? static_cast<long double>(remaining_slots)
+                                     : cumulative + sample.inclusion_probability[index];
         if (selected_count < sample_terms && point < next) {
             sample.selected[index] = true;
             ++selected_count;
@@ -306,14 +326,15 @@ HybridTruncationStats truncate_l1_optimal_pps_ht_impl(
         true);
 }
 
-HybridDiagnostics run_l1_optimal_pps_ht_impl(
+HybridDiagnostics run_optimal_pps_ht_impl(
     const Circuit& circuit,
     std::uint64_t seed,
-    const std::vector<std::size_t>& retained_schedule,
+    const KStrategyConfig& k_strategy,
     int rz_interval) {
     if (rz_interval <= 0) {
         throw std::invalid_argument("RZ truncation interval must be positive");
     }
+    validate_k_strategy(k_strategy, false);
 
     HybridDiagnostics diagnostics;
     PauliKernel kernel;
@@ -331,12 +352,11 @@ HybridDiagnostics run_l1_optimal_pps_ht_impl(
         diagnostics.peak_pre_truncation_terms = std::max<std::uint64_t>(
             diagnostics.peak_pre_truncation_terms,
             frontier.size());
-        if (truncation_index >= retained_schedule.size()) {
-            throw std::invalid_argument("retained schedule has too few events");
-        }
+        const auto decision = determine_k(
+            frontier, k_strategy, truncation_index);
         const auto stats = truncate_l1_optimal_pps_ht_impl(
             frontier,
-            retained_schedule[truncation_index],
+            decision.retained_terms,
             rng);
         ++truncation_index;
         diagnostics.max_heavy_terms = std::max<std::uint64_t>(
@@ -386,12 +406,15 @@ HybridDiagnostics run_l1_optimal_pps_ht_impl(
         truncate();
     }
 
-    if (truncation_index != retained_schedule.size()) {
-        throw std::invalid_argument("retained schedule has too many events");
+    if (k_strategy.strategy == KStrategy::Schedule &&
+        truncation_index != k_strategy.schedule.size()) {
+        throw std::invalid_argument("K schedule has too many events");
     }
 
     diagnostics.estimate = terminal_expectation(frontier);
-    diagnostics.error = std::abs(diagnostics.estimate - circuit.reference);
+    diagnostics.error = std::isfinite(circuit.reference)
+                            ? std::abs(diagnostics.estimate - circuit.reference)
+                            : std::numeric_limits<double>::quiet_NaN();
     diagnostics.runtime_seconds =
         std::chrono::duration<double>(Clock::now() - start).count();
     return diagnostics;
@@ -407,16 +430,37 @@ HybridTruncationStats truncate_l1_optimal_pps_ht(
         rng);
 }
 
+HybridDiagnostics run_optimal_pps_ht(
+    const Circuit& circuit,
+    std::uint64_t seed,
+    const KStrategyConfig& k_strategy,
+    int rz_interval) {
+    return run_optimal_pps_ht_impl(
+        circuit, seed, k_strategy, rz_interval);
+}
+
 HybridDiagnostics run_l1_optimal_pps_ht(
     const Circuit& circuit,
     std::uint64_t seed,
     const std::vector<std::size_t>& retained_schedule,
     int rz_interval) {
-    return run_l1_optimal_pps_ht_impl(
-        circuit,
-        seed,
-        retained_schedule,
-        rz_interval);
+    KStrategyConfig config;
+    config.strategy = KStrategy::Schedule;
+    config.schedule = retained_schedule;
+    return run_optimal_pps_ht(circuit, seed, config, rz_interval);
+}
+
+HybridDiagnostics run_l1_optimal_pps_ht_support_budget(
+    const Circuit& circuit,
+    std::uint64_t seed,
+    std::size_t maximum_support,
+    double minimum_magnitude,
+    int rz_interval) {
+    KStrategyConfig config;
+    config.strategy = KStrategy::SupportBudget;
+    config.maximum_support = maximum_support;
+    config.minimum_magnitude = minimum_magnitude;
+    return run_optimal_pps_ht(circuit, seed, config, rz_interval);
 }
 
 }  // namespace pauli_bench
