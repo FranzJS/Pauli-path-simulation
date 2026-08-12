@@ -1,0 +1,104 @@
+{
+  "schema_version": 2,
+  "references": [
+    {
+      "id": "clifford_t_n20_l12_seed20260715",
+      "model": "clifford_t",
+      "qubits": 20,
+      "layers": 12,
+      "circuit_generation_version": 1,
+      "circuit_seed": 20260715,
+      "parameters": {
+        "t_density": 0.70,
+        "depolarizing_probability": 0.0,
+        "dt": null,
+        "coupling": null,
+        "transverse_field": null,
+        "longitudinal_field": null,
+        "prefix_depth": null
+      },
+      "observable": {
+        "x_mask": "0x680",
+        "z_mask": "0x100"
+      },
+      "reference": {
+        "value": 0.329520762689497,
+        "method": "statevector",
+        "precision": "float64",
+        "uncertainty": null
+      },
+      "provenance": {
+        "software": "not_recorded",
+        "software_version": "not_recorded",
+        "generated_at": null,
+        "notes": "Dense statevector reference for the fixed benchmark circuit."
+      }
+    },
+    {
+      "id": "ising_n20_s12_dt0.12_J1_hx0.91_hz0.37",
+      "model": "ising",
+      "qubits": 20,
+      "layers": 12,
+      "circuit_generation_version": 1,
+      "circuit_seed": null,
+      "parameters": {
+        "t_density": null,
+        "depolarizing_probability": null,
+        "dt": 0.12,
+        "coupling": 1.0,
+        "transverse_field": 0.91,
+        "longitudinal_field": 0.37,
+        "prefix_depth": null
+      },
+      "observable": {
+        "x_mask": "0x0",
+        "z_mask": "0x600"
+      },
+      "reference": {
+        "value": 0.714108793456576,
+        "method": "statevector",
+        "precision": "float64",
+        "uncertainty": null
+      },
+      "provenance": {
+        "software": "not_recorded",
+        "software_version": "not_recorded",
+        "generated_at": null,
+        "notes": "Dense statevector reference for the fixed Trotterized circuit."
+      }
+    },
+    {
+      "id": "clifford_t_depol_n20_l12_seed20260715_p0.05",
+      "model": "clifford_t_depol",
+      "qubits": 20,
+      "layers": 12,
+      "circuit_generation_version": 1,
+      "circuit_seed": 20260715,
+      "parameters": {
+        "t_density": 0.70,
+        "depolarizing_probability": 0.05,
+        "dt": null,
+        "coupling": null,
+        "transverse_field": null,
+        "longitudinal_field": null,
+        "prefix_depth": null
+      },
+      "observable": {
+        "x_mask": "0x680",
+        "z_mask": "0x100"
+      },
+      "reference": {
+        "value": 0.0663217307060528,
+        "method": "converged_pauli",
+        "precision": "float64",
+        "uncertainty": null
+      },
+      "provenance": {
+        "software": "not_recorded",
+        "software_version": "not_recorded",
+        "generated_at": null,
+        "notes": "Converged Pauli-propagation reference for the noisy benchmark."
+      }
+    }
+  ]
+}

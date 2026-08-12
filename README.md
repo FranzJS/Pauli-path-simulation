@@ -16,6 +16,40 @@ All cases use 20 qubits. Truncation occurs after every four processed `RZ` gates
 
 The noiseless references are dense statevector results. The noisy reference is a converged Pauli calculation.
 
+## Reference registry
+
+Exact results and their identifying metadata live in
+[`references/reference_registry.json`](references/reference_registry.json), not
+in the C++ circuit source. A record is selected only when all configuration
+fields match: model, qubits, layers/Trotter steps, circuit-generation version,
+seed, physical parameters, and both observable masks. Thus a different size or
+seed cannot accidentally inherit an unrelated reference.
+
+Validate the registry after adding or editing a record:
+
+```bash
+python3 scripts/validate_reference_registry.py
+```
+
+The validator checks schema version 2, required fields and parameter ranges,
+model-specific fields, Pauli masks, finite results, unique IDs, and duplicate or
+conflicting configurations. CTest runs this validation automatically when a
+Python interpreter is available.
+
+By default, C++ programs use the registry in this source tree. To run against a
+different registry without rebuilding, set its path for that process:
+
+```bash
+PAULI_REFERENCE_REGISTRY=/path/to/references.json \
+  ./build/pauli_benchmark 20 12 clifford_t l1 0.00625
+```
+
+The public lookup interface is declared in
+[`reference_registry.hpp`](include/pauli_bench/reference_registry.hpp). A valid
+registry with no exact match produces a `nan` value/error, `unavailable`
+method, and empty reference ID; an unreadable, malformed, or ambiguous registry
+stops the run with an error.
+
 ## Build and test
 
 ```bash
@@ -60,11 +94,15 @@ Supported models are:
 | `clifford_t` | noiseless brickwork | T density 0.70, seed 20260715 |
 | `clifford_t_depol` | noisy brickwork | same circuit, depolarizing p=0.05 per qubit after each layer |
 | `ising` | nonintegrable Ising | dt 0.12, J 1.0, hx 0.91, hz 0.37 |
+| `clifford_t_identity` | optional shallow W, then Clifford+T U and its exact inverse | same noiseless Clifford+T parameters |
+| `ising_identity` | optional shallow W, then Trotterized Ising U and its exact inverse | same Ising parameters |
 
 `LAYERS` means brickwork layers for the Clifford models and Trotter steps for
-Ising. `L1_CUTOFF` is the maximum fraction of the current frontier L1 mass that
-may be removed at each truncation event; it must be between 0 and 1. It is a
-mass-error budget, not a direct maximum number of retained terms.
+Ising. For an `_identity` model it is the forward depth; the constructor appends
+the same number of inverse logical layers, giving `2 * LAYERS` total.
+`L1_CUTOFF` is the maximum fraction of the current frontier L1 mass that may be
+removed at each truncation event; it must be between 0 and 1. It is a mass-error
+budget, not a direct maximum number of retained terms.
 
 With `support`, every term satisfying `abs(coefficient) < MIN_MAGNITUDE` is
 removed first. If more than `MAX_SUPPORT` terms remain, only the
@@ -73,8 +111,12 @@ is retained unless the support cap removes it.
 
 The Clifford models support 4--64 qubits and Ising supports 2--64. The
 observable is centered as the width changes. Only the original 20-qubit,
-12-layer/step circuits have stored reference values; other configurations print
-`nan,unavailable,nan` for reference, reference method, and absolute error.
+12-layer/step standard circuits have stored registry values; other standard
+configurations print `nan,unavailable,,nan` for reference, reference method,
+empty reference ID, and absolute error. Prefixed identity circuits instead use
+the exact lightcone-statevector expectation of the shallow `W` circuit. CSV
+output includes the reference ID so generated results retain the provenance
+link.
 
 The configurable PPS interface is:
 
@@ -174,7 +216,8 @@ schedule and can execute PPS passes concurrently:
 
 ```bash
 ./scripts/run_pps_convergence.py build-native support 100000 1e-20 \
-  --passes 100 --output results/support_pps_convergence_100 --workers 8
+  --passes 100 --batches 5 \
+  --output results/support_pps_convergence_5x100 --workers 8
 
 ./scripts/run_pps_convergence.py build-native l1 \
   0.00625,0.00005,0.034 \
@@ -182,22 +225,71 @@ schedule and can execute PPS passes concurrently:
 ```
 
 Each worker launches a separate single-threaded C++ process. Results are reduced
-in pass-index order, so a fixed configuration and seed sequence produce the
-same estimates and running statistics regardless of worker count; timing and
-peak-RSS fields remain machine- and load-dependent. `total_runtime_s` and
+in batch/pass-index order, so a fixed configuration and seed sequence produce
+the same estimates and running statistics regardless of worker count; timing
+and peak-RSS fields remain machine- and load-dependent. `total_runtime_s` and
 `cumulative_pps_runtime_s` are sums of per-pass compute times, not elapsed wall
 time. Choose a smaller worker count when simultaneous frontier memory would
 exceed available RAM or when memory-bandwidth contention stops improving wall
 time.
 
-The convergence SVG plots the PPS empirical standard error
-`stdev(estimates) / sqrt(R)` on the same log scale as the running-mean absolute
-error and BFS error. To avoid emphasizing unstable few-sample estimates, the SE
-curve starts at `max(2, ceil(sqrt(total passes)))` (for example, pass 10 in a
-100-pass run).
+With `--batches B`, the convergence SVG draws each batch's running-mean
+absolute-error curve transparently and the pointwise arithmetic average of
+those error curves in full color. It does not draw a standard-error curve; the
+deterministic BFS error remains a dashed horizontal line. The former
+`run_support_pps_convergence.py` path remains as a compatibility wrapper.
 The pass-axis tick spacing is selected automatically from 1, 2, or 5 times a
 power of ten, keeping approximately six labels readable even for runs with
 hundreds or thousands of passes.
+
+## Identity-circuit convergence
+
+[`run_identity_pps_convergence.py`](scripts/run_identity_pps_convergence.py)
+runs the same convergence experiment at a chosen width for the two noiseless
+families. For `n` qubits it constructs a shallow circuit `W`, then `n` ordinary
+`U` layers or Trotter steps, followed by the exact gatewise inverse of `U`.
+Thus the full circuit has depth `W_DEPTH + 2n` and acts exactly like `W`.
+`W_DEPTH` defaults to 5.
+
+The exact reference is
+`<0|W^dagger O W|0>`. On first use of a new width, W depth, or Clifford circuit
+seed, `pauli_identity_reference` evaluates this on a reduced statevector
+containing only the finite-depth backward lightcone. The script atomically adds
+the result and its complete configuration to the JSON reference registry.
+Later runs reuse that record.
+
+Support-derived schedules:
+
+```bash
+python3 scripts/run_identity_pps_convergence.py \
+  build 12 support 20000 1e-8 \
+  --w-depth 5 --circuit-seed 20260715 \
+  --passes 100 --batches 5 --workers 8 \
+  --output results/identity_support_n12_5x100
+```
+
+L1-derived schedules, with separate Clifford+T and Ising cutoffs:
+
+```bash
+python3 scripts/run_identity_pps_convergence.py \
+  build 12 l1 0.00625,0.00005 \
+  --w-depth 5 --circuit-seed 20260715 \
+  --passes 100 --batches 5 --workers 8 \
+  --output results/identity_l1_n12_5x100
+```
+
+Both `--w-depth` and `--circuit-seed` may be omitted to use their defaults.
+For Clifford+T, the argument is a master seed: it selects `U` directly and a
+stable derived seed selects an independent `W` stream. This preserves the same
+`U` realization as the corresponding unprefixed run without duplicating its
+first layers in `W`. The Ising circuit is deterministic. `--registry PATH`
+selects an alternative schema-version-2 registry and is useful when generated
+references should not modify the repository registry.
+
+The output prefix produces a CSV and a two-panel SVG. As in the general
+convergence runner, transparent curves are individual batches, the solid curve
+is their pointwise average running-mean absolute error, and the dashed line is
+the deterministic BFS error.
 
 The committed outputs include the
 [single-pass comparison](results/optimal_pps_single_pass.csv),

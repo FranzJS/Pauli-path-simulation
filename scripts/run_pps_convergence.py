@@ -17,6 +17,7 @@ RAW_COLUMNS = [
     "family", "case", "method", "truncation_strategy", "tail_ratio",
     "seed", "qubits", "l1_cutoff", "maximum_support",
     "minimum_magnitude", "estimate", "reference", "reference_method",
+    "reference_id",
     "absolute_error", "runtime_s", "peak_support_terms",
     "peak_pre_truncation_terms", "peak_post_truncation_terms",
     "truncation_events", "peak_vector_capacity_terms",
@@ -27,10 +28,11 @@ RAW_COLUMNS = [
 
 OUTPUT_COLUMNS = [
     "family", "case", "qubits", "layers", "k_strategy", "l1_cutoff",
-    "maximum_support", "minimum_magnitude", "passes", "seed", "pass_estimate",
-    "running_mean_estimate", "running_mean_absolute_error",
-    "empirical_standard_error",
+    "maximum_support", "minimum_magnitude", "batch", "passes", "seed",
+    "pass_estimate", "running_mean_estimate", "running_mean_absolute_error",
+    "average_batch_running_mean_absolute_error",
     "deterministic_estimate", "deterministic_absolute_error", "reference",
+    "reference_id",
     "pass_runtime_s", "cumulative_pps_runtime_s", "schedule",
 ]
 
@@ -64,10 +66,13 @@ def get_schedule(
     layers: int,
     model: str,
     k_arguments: list[str],
+    circuit_arguments: list[str] | None = None,
 ) -> tuple[int, ...]:
+    extra_arguments = circuit_arguments or []
     completed = subprocess.run(
         [
             str(executable), str(qubits), str(layers), model,
+            *extra_arguments,
             *k_arguments, "schedule",
         ],
         check=True,
@@ -80,8 +85,13 @@ def get_schedule(
     return tuple(int(value) for value in encoded.split(":"))
 
 
-def seed_for(case_index: int, pass_index: int) -> int:
-    return 202707270000 + 1009 * case_index + pass_index
+def seed_for(case_index: int, batch_index: int, pass_index: int) -> int:
+    return (
+        202707270000
+        + 1_000_003 * batch_index
+        + 1009 * case_index
+        + pass_index
+    )
 
 
 def default_workers() -> int:
@@ -126,6 +136,7 @@ def parse_arguments() -> argparse.Namespace:
 
     for subparser in (support, l1):
         subparser.add_argument("--passes", type=int, default=100)
+        subparser.add_argument("--batches", type=int, default=1)
         subparser.add_argument("--output", type=Path)
         subparser.add_argument("--workers", type=int, default=default_workers())
     return parser.parse_args()
@@ -149,20 +160,22 @@ def render_svg(
     output_path: Path,
     trajectories: list[dict[str, object]],
     passes: int,
+    batches: int,
     strategy_description: str,
     deterministic_label: str,
+    caption_lines: tuple[str, ...] | None = None,
 ) -> None:
-    width = 1200
-    height = 475
     panel_width = 370
     panel_gap = 22
+    content_width = len(trajectories) * (panel_width + panel_gap) + 24
+    width = max(1000, content_width)
+    content_offset = (width - content_width) / 2
+    height = 475
     left = 62
     top = 42
     plot_width = 295
     plot_height = 285
     blue = "#1f77b4"
-    orange = "#d97706"
-    standard_error_start = max(2, math.ceil(math.sqrt(passes)))
     svg: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
         f'height="{height}" viewBox="0 0 {width} {height}">',
@@ -171,28 +184,29 @@ def render_svg(
         '.tick{font-size:11px}.title{font-size:15px;font-weight:600}'
         '.label{font-size:13px}.legend{font-size:11px}</style>',
     ]
-    panel_labels = ["(a)", "(b)", "(c)"]
+    panel_labels = [
+        f"({chr(ord('a') + index)})" for index in range(len(trajectories))
+    ]
     for panel_index, (panel, trajectory) in enumerate(
         zip(panel_labels, trajectories, strict=True)
     ):
-        origin_x = panel_index * (panel_width + panel_gap)
+        origin_x = content_offset + panel_index * (panel_width + panel_gap)
         x0 = origin_x + left
         y0 = top
-        errors = [
-            max(float(value), 1e-18)
-            for value in trajectory["running_errors"]  # type: ignore[index]
+        batch_errors = [
+            [max(float(value), 1e-18) for value in errors]
+            for errors in trajectory["batch_errors"]  # type: ignore[index]
         ]
-        standard_errors = [
-            None if value is None else max(float(value), 1e-18)
-            for value in trajectory["standard_errors"]  # type: ignore[index]
+        average_errors = [
+            max(float(value), 1e-18)
+            for value in trajectory["average_errors"]  # type: ignore[index]
         ]
         baseline = max(float(trajectory["deterministic_error"]), 1e-18)
-        visible_standard_errors = [
-            value
-            for index, value in enumerate(standard_errors, start=1)
-            if index >= standard_error_start and value is not None
+        all_values = [
+            *(value for errors in batch_errors for value in errors),
+            *average_errors,
+            baseline,
         ]
-        all_values = [*errors, *visible_standard_errors, baseline]
         low_decade = math.floor(math.log10(min(all_values)))
         high_decade = math.ceil(math.log10(max(all_values)))
         if high_decade <= low_decade:
@@ -238,25 +252,24 @@ def render_svg(
                 f'<text class="tick" x="{x:.2f}" y="{y0 + plot_height + 18}" '
                 f'text-anchor="middle">{tick}</text>'
             )
-        points = " ".join(
+        for errors in batch_errors:
+            points = " ".join(
+                f"{x_position(index):.2f},{y_position(value):.2f}"
+                for index, value in enumerate(errors, start=1)
+            )
+            svg.append(
+                f'<polyline points="{points}" fill="none" stroke="{blue}" '
+                f'stroke-opacity="0.22" stroke-width="1.2" '
+                f'stroke-linejoin="round"/>'
+            )
+        average_points = " ".join(
             f"{x_position(index):.2f},{y_position(value):.2f}"
-            for index, value in enumerate(errors, start=1)
+            for index, value in enumerate(average_errors, start=1)
         )
         svg.append(
-            f'<polyline points="{points}" fill="none" stroke="{blue}" '
-            f'stroke-width="1.6" stroke-linejoin="round"/>'
+            f'<polyline points="{average_points}" fill="none" stroke="{blue}" '
+            f'stroke-width="2.2" stroke-linejoin="round"/>'
         )
-        standard_error_points = " ".join(
-            f"{x_position(index):.2f},{y_position(value):.2f}"
-            for index, value in enumerate(standard_errors, start=1)
-            if index >= standard_error_start and value is not None
-        )
-        if standard_error_points:
-            svg.append(
-                f'<polyline points="{standard_error_points}" fill="none" '
-                f'stroke="{orange}" stroke-width="1.5" '
-                f'stroke-dasharray="2,4" stroke-linejoin="round"/>'
-            )
         baseline_y = y_position(baseline)
         svg.append(
             f'<line x1="{x0}" y1="{baseline_y:.2f}" '
@@ -271,29 +284,30 @@ def render_svg(
         )
         svg.append(
             f'<line x1="{legend_x}" y1="{legend_y}" x2="{legend_x + 30}" '
-            f'y2="{legend_y}" stroke="{blue}" stroke-width="1.6"/>'
+            f'y2="{legend_y}" stroke="{blue}" stroke-opacity="0.22" '
+            f'stroke-width="1.2"/>'
         )
         svg.append(
             f'<text class="legend" x="{legend_x + 35}" y="{legend_y + 4}">'
-            'Magnitude PPS</text>'
+            'Individual batches</text>'
         )
         svg.append(
             f'<line x1="{legend_x}" y1="{legend_y + 18}" '
             f'x2="{legend_x + 30}" y2="{legend_y + 18}" stroke="{blue}" '
-            f'stroke-width="1.4" stroke-dasharray="7,5"/>'
+            f'stroke-width="2.2"/>'
         )
         svg.append(
             f'<text class="legend" x="{legend_x + 35}" y="{legend_y + 22}">'
-            f'{deterministic_label}</text>'
+            'Batch average</text>'
         )
         svg.append(
             f'<line x1="{legend_x}" y1="{legend_y + 36}" '
-            f'x2="{legend_x + 30}" y2="{legend_y + 36}" stroke="{orange}" '
-            f'stroke-width="1.5" stroke-dasharray="2,4"/>'
+            f'x2="{legend_x + 30}" y2="{legend_y + 36}" stroke="{blue}" '
+            f'stroke-width="1.4" stroke-dasharray="7,5"/>'
         )
         svg.append(
             f'<text class="legend" x="{legend_x + 35}" y="{legend_y + 40}">'
-            'PPS empirical SE</text>'
+            f'{deterministic_label}</text>'
         )
         svg.append(
             f'<text class="label" x="{x0 + plot_width / 2:.1f}" '
@@ -307,24 +321,30 @@ def render_svg(
                 f'text-anchor="middle" transform="rotate(-90 16 {center_y:.1f})">'
                 'Running-mean absolute error</text>'
             )
-    svg.append(
-        f'<text class="label" x="600" y="405" text-anchor="middle">'
-        f'{passes} independent magnitude-PPS/HT passes; K schedule from '
-        f'deterministic {strategy_description}; truncation every 4 RZ gates.'
-        '</text>'
+    center_x = width / 2
+    footer_lines = (
+        caption_lines
+        if caption_lines is not None
+        else (
+            'All cases: 20 qubits and 12 layers/steps. Clifford+T: T density '
+            '0.70, circuit seed 20260715; noisy case: depolarizing p=0.05 '
+            'after each layer.',
+            'Ising: dt=0.12, J=1.0, hx=0.91, hz=0.37. Solid: running-mean '
+            f'error; dashed: {deterministic_label} error.',
+        )
     )
-    svg.append(
-        '<text class="tick" x="600" y="428" text-anchor="middle">'
-        'All cases: 20 qubits and 12 layers/steps. Clifford+T: T density 0.70, '
-        'circuit seed 20260715; noisy case: depolarizing p=0.05 after each layer.'
-        '</text>'
+    all_footer_lines = (
+        f'{batches} independent batches of {passes} magnitude-PPS/HT passes; '
+        f'K schedule from deterministic {strategy_description}; truncation '
+        'every 4 RZ gates.',
+        *footer_lines,
     )
-    svg.append(
-        f'<text class="tick" x="600" y="449" text-anchor="middle">'
-        'Ising: dt=0.12, J=1.0, hx=0.91, hz=0.37. Solid: running-mean error; '
-        f'dashed: {deterministic_label} error.'
-        '</text>'
-    )
+    for line_index, line in enumerate(all_footer_lines):
+        css_class = "label" if line_index == 0 else "tick"
+        svg.append(
+            f'<text class="{css_class}" x="{center_x:.1f}" '
+            f'y="{405 + 22 * line_index}" text-anchor="middle">{line}</text>'
+        )
     svg.append('</svg>')
     output_path.write_text("\n".join(svg) + "\n", encoding="utf-8")
 
@@ -334,6 +354,7 @@ def main() -> int:
     build_dir: Path = arguments.build_dir
     strategy: str = arguments.strategy
     passes: int = arguments.passes
+    batches: int = arguments.batches
     workers: int = arguments.workers
     if strategy == "support":
         maximum_support: int = arguments.maximum_support
@@ -357,11 +378,14 @@ def main() -> int:
             + ",".join(f"{value:.5g}" for value in l1_cutoffs)
         )
         deterministic_label = "BFS + L1"
+    default_suffix = f"{batches}x{passes}" if batches > 1 else str(passes)
     output_prefix: Path = arguments.output or Path(
-        f"results/{strategy}_pps_convergence_{passes}"
+        f"results/{strategy}_pps_convergence_{default_suffix}"
     )
     if passes <= 0:
         raise ValueError("passes must be positive")
+    if batches <= 0:
+        raise ValueError("batches must be positive")
     if workers <= 0:
         raise ValueError("workers must be positive")
 
@@ -399,81 +423,103 @@ def main() -> int:
             flush=True,
         )
 
-        def run_pass(pass_index: int) -> dict[str, str]:
+        def run_pass(task: tuple[int, int]) -> dict[str, str]:
+            batch_index, pass_index = task
             return run_result([
                 str(executable), str(qubits), str(layers), model,
                 "schedule", encoded_schedule, "pps_ht",
-                str(seed_for(case_index, pass_index)),
+                str(seed_for(case_index, batch_index, pass_index)),
             ])
 
-        worker_count = min(workers, passes)
+        tasks = [
+            (batch_index, pass_index)
+            for batch_index in range(batches)
+            for pass_index in range(1, passes + 1)
+        ]
+        worker_count = min(workers, len(tasks))
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            ordered_runs = list(executor.map(run_pass, range(1, passes + 1)))
+            ordered_runs = list(executor.map(run_pass, tasks))
 
-        estimates: list[float] = []
-        running_errors: list[float] = []
-        standard_errors: list[float | None] = []
-        cumulative_runtime = 0.0
-        for pass_index, run in enumerate(ordered_runs, start=1):
-            seed = seed_for(case_index, pass_index)
-            estimate = float(run["estimate"])
-            runtime = float(run["runtime_s"])
-            estimates.append(estimate)
-            cumulative_runtime += runtime
-            running_mean = sum(estimates) / pass_index
-            running_error = abs(running_mean - reference)
-            running_errors.append(running_error)
-            standard_errors.append(
-                None
-                if pass_index < 2
-                else statistics.stdev(estimates) / math.sqrt(pass_index)
+        batch_records: list[list[dict[str, object]]] = []
+        batch_errors: list[list[float]] = []
+        for batch_index in range(batches):
+            batch_runs = ordered_runs[
+                batch_index * passes:(batch_index + 1) * passes
+            ]
+            estimates: list[float] = []
+            running_errors: list[float] = []
+            cumulative_runtime = 0.0
+            records: list[dict[str, object]] = []
+            for pass_index, run in enumerate(batch_runs, start=1):
+                seed = seed_for(case_index, batch_index, pass_index)
+                estimate = float(run["estimate"])
+                runtime = float(run["runtime_s"])
+                estimates.append(estimate)
+                cumulative_runtime += runtime
+                running_mean = statistics.fmean(estimates)
+                running_error = abs(running_mean - reference)
+                running_errors.append(running_error)
+                records.append({
+                    "family": run["family"],
+                    "case": run["case"],
+                    "qubits": qubits,
+                    "layers": layers,
+                    "k_strategy": strategy,
+                    "l1_cutoff": (
+                        f"{l1_cutoff:.17g}" if strategy == "l1" else ""
+                    ),
+                    "maximum_support": (
+                        maximum_support if strategy == "support" else ""
+                    ),
+                    "minimum_magnitude": (
+                        f"{minimum_magnitude:.17g}"
+                        if strategy == "support"
+                        else ""
+                    ),
+                    "batch": batch_index + 1,
+                    "passes": pass_index,
+                    "seed": seed,
+                    "pass_estimate": f"{estimate:.17g}",
+                    "running_mean_estimate": f"{running_mean:.17g}",
+                    "running_mean_absolute_error": f"{running_error:.17g}",
+                    "deterministic_estimate": f"{deterministic_estimate:.17g}",
+                    "deterministic_absolute_error": f"{deterministic_error:.17g}",
+                    "reference": f"{reference:.17g}",
+                    "reference_id": deterministic["reference_id"],
+                    "pass_runtime_s": f"{runtime:.9f}",
+                    "cumulative_pps_runtime_s": f"{cumulative_runtime:.9f}",
+                    "schedule": encoded_schedule,
+                })
+            batch_records.append(records)
+            batch_errors.append(running_errors)
+            print(
+                f"{title}, batch {batch_index + 1}/{batches}, R={passes}: "
+                f"running-mean error {running_errors[-1]:.3e}",
+                flush=True,
             )
-            standard_error = standard_errors[-1]
-            rows.append({
-                "family": run["family"],
-                "case": run["case"],
-                "qubits": qubits,
-                "layers": layers,
-                "k_strategy": strategy,
-                "l1_cutoff": (
-                    f"{l1_cutoff:.17g}" if strategy == "l1" else ""
-                ),
-                "maximum_support": (
-                    maximum_support if strategy == "support" else ""
-                ),
-                "minimum_magnitude": (
-                    f"{minimum_magnitude:.17g}"
-                    if strategy == "support"
-                    else ""
-                ),
-                "passes": pass_index,
-                "seed": seed,
-                "pass_estimate": f"{estimate:.17g}",
-                "running_mean_estimate": f"{running_mean:.17g}",
-                "running_mean_absolute_error": f"{running_error:.17g}",
-                "empirical_standard_error": (
-                    ""
-                    if standard_error is None
-                    else f"{standard_error:.17g}"
-                ),
-                "deterministic_estimate": f"{deterministic_estimate:.17g}",
-                "deterministic_absolute_error": f"{deterministic_error:.17g}",
-                "reference": f"{reference:.17g}",
-                "pass_runtime_s": f"{runtime:.9f}",
-                "cumulative_pps_runtime_s": f"{cumulative_runtime:.9f}",
-                "schedule": encoded_schedule,
-            })
-            if pass_index in {1, 10, 20, 50, passes}:
+
+        average_errors = [
+            statistics.fmean(errors[pass_index] for errors in batch_errors)
+            for pass_index in range(passes)
+        ]
+        for records in batch_records:
+            for pass_index, record in enumerate(records):
+                record["average_batch_running_mean_absolute_error"] = (
+                    f"{average_errors[pass_index]:.17g}"
+                )
+                rows.append(record)
+        for pass_index in sorted({1, 10, 20, 50, passes}):
+            if pass_index <= passes:
                 print(
-                    f"{title}, R={pass_index}: running-mean error "
-                    f"{running_error:.3e}",
+                    f"{title}, batch-average R={pass_index}: error "
+                    f"{average_errors[pass_index - 1]:.3e}",
                     flush=True,
                 )
 
         trajectories.append({
             "title": title,
-            "running_errors": running_errors,
-            "standard_errors": standard_errors,
+            "batch_errors": batch_errors,
+            "average_errors": average_errors,
             "deterministic_error": deterministic_error,
         })
 
@@ -487,6 +533,7 @@ def main() -> int:
         output_prefix.with_suffix(".svg"),
         trajectories,
         passes,
+        batches,
         strategy_description,
         deterministic_label,
     )

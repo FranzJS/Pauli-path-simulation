@@ -190,6 +190,25 @@ void test_configured_circuits() {
         0.0663217307060528,
         0.0,
         "fixed configuration must retain its reference");
+    require(
+        fixed.reference_method == "converged_pauli",
+        "fixed configuration must load its reference method");
+    require(
+        fixed.reference_id ==
+            "clifford_t_depol_n20_l12_seed20260715_p0.05",
+        "fixed configuration must load its registry id");
+
+    const auto fixed_cases = benchmark_circuits();
+    require(fixed_cases.size() == 3, "three benchmark references must load");
+    require(
+        std::all_of(
+            fixed_cases.begin(),
+            fixed_cases.end(),
+            [](const Circuit& circuit) {
+                return std::isfinite(circuit.reference) &&
+                       !circuit.reference_id.empty();
+            }),
+        "every fixed benchmark must resolve one registry record");
 
     bool rejected_model = false;
     try {
@@ -198,6 +217,99 @@ void test_configured_circuits() {
         rejected_model = true;
     }
     require(rejected_model, "unknown circuit model must be rejected");
+}
+
+void test_identity_echo_circuits() {
+    using namespace pauli_bench;
+
+    const auto clifford = make_configured_circuit(
+        4, 3, "clifford_t_identity", 0.0);
+    require(
+        clifford.family == "clifford_t_identity",
+        "Clifford identity circuit family");
+    require(
+        clifford.name.find("_total_d6") != std::string::npos,
+        "Clifford identity circuit must report twice the forward depth");
+    require_close(
+        clifford.reference,
+        0.0,
+        0.0,
+        "Clifford identity target has zero expectation on |0>");
+    require(
+        clifford.reference_method == "analytic_identity",
+        "identity reference method must be analytic");
+
+    const auto ising = make_configured_circuit(
+        4, 3, "ising_identity", 0.0);
+    require_close(
+        ising.reference,
+        1.0,
+        0.0,
+        "Ising ZZ identity target has unit expectation on |0>");
+
+    for (const Circuit* source : {&clifford, &ising}) {
+        for (const Pauli observable : {
+                 Pauli{1, 0}, Pauli{0, 1}, Pauli{1, 1}, Pauli{0, 0b1010}}) {
+            Circuit probe = *source;
+            probe.observable = observable;
+            const double expected = observable.x == 0 ? 1.0 : 0.0;
+            require_close(
+                statevector_expectation(probe),
+                expected,
+                3e-13,
+                "U followed by its gatewise inverse must be identity");
+        }
+        const auto exact_bfs = run_bfs_l1_truncated(*source, 4);
+        require_close(
+            exact_bfs.estimate,
+            source->reference,
+            3e-13,
+            "untruncated BFS identity estimate");
+    }
+
+    constexpr std::uint64_t circuit_seed = 987654;
+    for (const int qubits : {4, 6, 10}) {
+        for (const int w_depth : {1, 2, 3}) {
+            const auto clifford_w = make_prefixed_identity_echo_circuit(
+                qubits, 1, w_depth, "clifford_t", circuit_seed, 0.0);
+            const auto clifford_reference =
+                compute_prefixed_identity_reference(
+                    qubits, w_depth, "clifford_t", circuit_seed);
+            require_close(
+                clifford_reference.value,
+                statevector_expectation(clifford_w),
+                5e-13,
+                "Clifford lightcone statevector must equal full statevector");
+            require(
+                clifford_reference.lightcone_qubits <= qubits,
+                "Clifford lightcone cannot exceed full circuit width");
+
+            const auto ising_w = make_prefixed_identity_echo_circuit(
+                qubits, 1, w_depth, "ising", circuit_seed, 0.0);
+            const auto ising_reference = compute_prefixed_identity_reference(
+                qubits, w_depth, "ising", circuit_seed);
+            require_close(
+                ising_reference.value,
+                statevector_expectation(ising_w),
+                5e-13,
+                "Ising lightcone statevector must equal full statevector");
+            require(
+                ising_reference.lightcone_qubits <= qubits,
+                "Ising lightcone cannot exceed full circuit width");
+        }
+    }
+
+    for (const std::string& model : {"clifford_t", "ising"}) {
+        const auto prefixed = make_prefixed_identity_echo_circuit(
+            6, 3, 2, model, circuit_seed, 0.0);
+        const auto exact_reference = compute_prefixed_identity_reference(
+            6, 2, model, circuit_seed);
+        require_close(
+            statevector_expectation(prefixed),
+            exact_reference.value,
+            8e-13,
+            "W followed by U and U-dagger must have the W reference");
+    }
 }
 
 void test_support_budget_truncation() {
@@ -414,6 +526,7 @@ int main() {
         test_rz_branching();
         test_small_circuits_against_statevector();
         test_configured_circuits();
+        test_identity_echo_circuits();
         test_support_budget_truncation();
         test_l1_optimal_pps_ht_truncation();
         test_l1_optimal_pps_ht_probabilities_and_unbiasedness();

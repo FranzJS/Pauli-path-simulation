@@ -16,6 +16,7 @@ RAW_COLUMNS = [
     "family", "case", "method", "truncation_strategy", "tail_ratio",
     "seed", "qubits", "l1_cutoff", "maximum_support",
     "minimum_magnitude", "estimate", "reference", "reference_method",
+    "reference_id",
     "absolute_error", "runtime_s", "peak_support_terms",
     "peak_pre_truncation_terms", "peak_post_truncation_terms",
     "truncation_events", "peak_vector_capacity_terms",
@@ -37,7 +38,7 @@ PROGRESSIVE_COLUMNS = [
     "mean_runtime_s", "total_runtime_s", "max_peak_rss_mb",
     "pass_max_importance_multiplier", "max_importance_multiplier",
     "pass_max_post_truncation_abs_coefficient",
-    "max_post_truncation_abs_coefficient", "reference",
+    "max_post_truncation_abs_coefficient", "reference", "reference_id",
 ]
 
 # Explicitly reproduce the three historical fixed benchmark configurations.
@@ -340,6 +341,7 @@ def main() -> int:
                         f"{max_abs_coefficient:.17g}"
                     ),
                     "reference": f"{reference:.17g}",
+                    "reference_id": first["reference_id"],
                 }
             )
 

@@ -76,6 +76,7 @@ void print_result(
         << result.estimate << ','
         << circuit.reference << ','
         << circuit.reference_method << ','
+        << circuit.reference_id << ','
         << result.error << ','
         << result.runtime_seconds << ','
         << result.peak_support_terms << ','
@@ -99,7 +100,9 @@ int main(int argc, char** argv) {
     if (argc < 7) {
         throw std::invalid_argument(
             "usage: pauli_magnitude_pps_benchmark QUBITS LAYERS "
-            "clifford_t|ising|clifford_t_depol "
+            "clifford_t|ising|clifford_t_depol|"
+            "clifford_t_identity|ising_identity "
+            "[prefix W_DEPTH CIRCUIT_SEED] "
             "(l1 L1_CUTOFF | support MAX_SUPPORT MIN_MAGNITUDE | "
             "schedule K_SCHEDULE) bfs|schedule|pps_ht [SEED]");
     }
@@ -107,38 +110,82 @@ int main(int argc, char** argv) {
     const int qubits = std::stoi(argv[1]);
     const int layers = std::stoi(argv[2]);
     const std::string model = argv[3];
-    const std::string strategy = argv[4];
+    int argument_index = 4;
+    bool has_prefix = false;
+    int prefix_layers = 0;
+    std::uint64_t circuit_seed = 20260715;
+    const bool identity_model =
+        model == "clifford_t_identity" || model == "ising_identity";
+    if (identity_model && argument_index < argc &&
+        std::string(argv[argument_index]) == "prefix") {
+        if (argument_index + 2 >= argc) {
+            throw std::invalid_argument(
+                "prefix requires W_DEPTH and CIRCUIT_SEED");
+        }
+        has_prefix = true;
+        prefix_layers = std::stoi(argv[argument_index + 1]);
+        circuit_seed = static_cast<std::uint64_t>(
+            std::stoull(argv[argument_index + 2]));
+        argument_index += 3;
+    }
+    if (argument_index >= argc) {
+        throw std::invalid_argument("missing truncation strategy");
+    }
+    const std::string strategy = argv[argument_index++];
     pauli_bench::KStrategyConfig k_strategy;
-    int method_index{};
     if (strategy == "l1") {
+        if (argument_index >= argc) {
+            throw std::invalid_argument("l1 strategy requires L1_CUTOFF");
+        }
         k_strategy.strategy = pauli_bench::KStrategy::L1Mass;
-        k_strategy.l1_cutoff = std::stod(argv[5]);
-        method_index = 6;
+        k_strategy.l1_cutoff = std::stod(argv[argument_index++]);
     } else if (strategy == "support") {
-        if (argc < 8) {
+        if (argument_index + 1 >= argc) {
             throw std::invalid_argument(
                 "support strategy requires MAX_SUPPORT and MIN_MAGNITUDE");
         }
         k_strategy.strategy = pauli_bench::KStrategy::SupportBudget;
-        k_strategy.maximum_support = parse_maximum_support(argv[5]);
-        k_strategy.minimum_magnitude = parse_minimum_magnitude(argv[6]);
-        method_index = 7;
+        k_strategy.maximum_support = parse_maximum_support(
+            argv[argument_index++]);
+        k_strategy.minimum_magnitude = parse_minimum_magnitude(
+            argv[argument_index++]);
     } else if (strategy == "schedule") {
+        if (argument_index >= argc) {
+            throw std::invalid_argument(
+                "schedule strategy requires K_SCHEDULE");
+        }
         k_strategy.strategy = pauli_bench::KStrategy::Schedule;
-        k_strategy.schedule = parse_schedule(argv[5]);
-        method_index = 6;
+        k_strategy.schedule = parse_schedule(argv[argument_index++]);
     } else {
         throw std::invalid_argument("strategy must be l1, support, or schedule");
     }
     pauli_bench::validate_k_strategy(k_strategy);
-    const std::string method = argv[method_index];
-    const auto circuit = pauli_bench::make_configured_circuit(
-        qubits,
-        layers,
-        model,
-        strategy == "l1" ? k_strategy.l1_cutoff : 0.0);
+    if (argument_index >= argc) {
+        throw std::invalid_argument("missing method");
+    }
+    const std::string method = argv[argument_index++];
+    const double circuit_l1_cutoff =
+        strategy == "l1" ? k_strategy.l1_cutoff : 0.0;
+    const auto circuit = has_prefix
+                             ? pauli_bench::make_prefixed_identity_echo_circuit(
+                                   qubits,
+                                   layers,
+                                   prefix_layers,
+                                   model == "clifford_t_identity"
+                                       ? "clifford_t"
+                                       : "ising",
+                                   circuit_seed,
+                                   circuit_l1_cutoff)
+                             : pauli_bench::make_configured_circuit(
+                                   qubits,
+                                   layers,
+                                   model,
+                                   circuit_l1_cutoff);
 
     if (method == "bfs") {
+        if (argument_index != argc) {
+            throw std::invalid_argument("bfs accepts no trailing arguments");
+        }
         const auto result = pauli_bench::run_bfs_truncated(
             circuit, k_strategy, 4);
         const std::string bfs_method = strategy == "l1"
@@ -159,6 +206,10 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (method == "schedule") {
+        if (argument_index != argc) {
+            throw std::invalid_argument(
+                "schedule accepts no trailing arguments");
+        }
         std::vector<std::size_t> retained_schedule;
         pauli_bench::run_bfs_truncated(
             circuit, k_strategy, 4, &retained_schedule);
@@ -172,12 +223,12 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (method == "pps_ht") {
-        if (argc <= method_index + 1) {
+        if (argument_index >= argc) {
             throw std::invalid_argument("pps_ht requires SEED");
         }
         const auto seed = static_cast<std::uint64_t>(
-            std::stoull(argv[method_index + 1]));
-        if (argc != method_index + 2) {
+            std::stoull(argv[argument_index++]));
+        if (argument_index != argc) {
             throw std::invalid_argument(
                 "pps_ht accepts exactly one SEED after the method");
         }
