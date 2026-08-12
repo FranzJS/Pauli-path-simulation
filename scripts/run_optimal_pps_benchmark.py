@@ -5,14 +5,18 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import statistics
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 RAW_COLUMNS = [
-    "family", "case", "method", "tail_ratio", "seed", "qubits",
-    "l1_cutoff", "estimate", "reference", "reference_method",
+    "family", "case", "method", "truncation_strategy", "tail_ratio",
+    "seed", "qubits", "l1_cutoff", "maximum_support",
+    "minimum_magnitude", "estimate", "reference", "reference_method",
+    "reference_id",
     "absolute_error", "runtime_s", "peak_support_terms",
     "peak_pre_truncation_terms", "peak_post_truncation_terms",
     "truncation_events", "peak_vector_capacity_terms",
@@ -34,25 +38,40 @@ PROGRESSIVE_COLUMNS = [
     "mean_runtime_s", "total_runtime_s", "max_peak_rss_mb",
     "pass_max_importance_multiplier", "max_importance_multiplier",
     "pass_max_post_truncation_abs_coefficient",
-    "max_post_truncation_abs_coefficient", "reference",
+    "max_post_truncation_abs_coefficient", "reference", "reference_id",
+]
+
+# Explicitly reproduce the three historical fixed benchmark configurations.
+CASES = [
+    (20, 12, "clifford_t", 0.00625),
+    (20, 12, "ising", 0.00005),
+    (20, 12, "clifford_t_depol", 0.034),
 ]
 
 
 def run_once(
     executable: Path,
-    case_index: int,
+    configuration: tuple[int, int, str, float],
     method: str,
     seed: int = 0,
     retained_schedule: tuple[int, ...] = (),
 ) -> dict[str, str]:
-    command = [str(executable), str(case_index), method]
+    qubits, layers, model, l1_cutoff = configuration
     if method == "pps_ht":
         if not retained_schedule:
             raise ValueError("PPS runs require a retained-support schedule")
-        command.extend([
-            str(seed),
+        command = [
+            str(executable), str(qubits), str(layers), model,
+            "schedule",
             ":".join(str(value) for value in retained_schedule),
-        ])
+            method,
+            str(seed),
+        ]
+    else:
+        command = [
+            str(executable), str(qubits), str(layers), model,
+            "l1", str(l1_cutoff), method,
+        ]
     wrapper = Path(__file__).with_name("measure_process.py")
     completed = subprocess.run(
         [sys.executable, str(wrapper), *command],
@@ -74,14 +93,14 @@ def run_once(
 
 def repeated_timing(
     executable: Path,
-    case_index: int,
+    configuration: tuple[int, int, str, float],
     method: str,
     repetitions: int,
     seed: int = 0,
     retained_schedule: tuple[int, ...] = (),
 ) -> tuple[dict[str, str], list[float], list[float]]:
     runs = [
-        run_once(executable, case_index, method, seed, retained_schedule)
+        run_once(executable, configuration, method, seed, retained_schedule)
         for _ in range(repetitions)
     ]
     first = runs[0]
@@ -103,9 +122,20 @@ def seed_for(case_index: int, pass_index: int) -> int:
     return 202707160300 + 1009 * case_index + pass_index
 
 
-def calibrate_schedule(executable: Path, case_index: int) -> tuple[int, ...]:
+def default_workers() -> int:
+    return os.cpu_count() or 1
+
+
+def calibrate_schedule(
+    executable: Path,
+    configuration: tuple[int, int, str, float],
+) -> tuple[int, ...]:
+    qubits, layers, model, l1_cutoff = configuration
     completed = subprocess.run(
-        [str(executable), str(case_index), "schedule"],
+        [
+            str(executable), str(qubits), str(layers), model,
+            "l1", str(l1_cutoff), "schedule",
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -153,6 +183,7 @@ def main() -> int:
         else "results/optimal_pps_20_pass.csv"
     )
     pass_spec = sys.argv[5] if len(sys.argv) > 5 else "20"
+    workers = int(sys.argv[6] if len(sys.argv) > 6 else default_workers())
     if "," in pass_spec:
         pass_counts = tuple(int(value) for value in pass_spec.split(","))
         if len(pass_counts) != 3:
@@ -164,17 +195,19 @@ def main() -> int:
         raise ValueError("timing repetitions must be positive")
     if any(pass_count <= 0 for pass_count in pass_counts):
         raise ValueError("pass counts must be positive")
+    if workers <= 0:
+        raise ValueError("workers must be positive")
 
     executable = build_dir / "pauli_magnitude_pps_benchmark"
     single_rows: list[dict[str, object]] = []
     progressive_rows: list[dict[str, object]] = []
 
-    for case_index in range(3):
+    for case_index, configuration in enumerate(CASES):
         max_passes = pass_counts[case_index]
-        retained_schedule = calibrate_schedule(executable, case_index)
+        retained_schedule = calibrate_schedule(executable, configuration)
         baseline, baseline_times, baseline_rss_values = repeated_timing(
             executable,
-            case_index,
+            configuration,
             "bfs",
             repetitions,
         )
@@ -194,7 +227,7 @@ def main() -> int:
         first_seed = seed_for(case_index, 1)
         first, first_times, first_rss_values = repeated_timing(
             executable,
-            case_index,
+            configuration,
             method,
             repetitions,
             seed=first_seed,
@@ -226,19 +259,26 @@ def main() -> int:
         max_abs_coefficient = 0.0
         reference = float(first["reference"])
 
-        for pass_index in range(1, max_passes + 1):
+        def run_pass(pass_index: int) -> dict[str, str]:
+            return run_once(
+                executable,
+                configuration,
+                method,
+                seed=seed_for(case_index, pass_index),
+                retained_schedule=retained_schedule,
+            )
+
+        pass_indices = range(2, max_passes + 1)
+        worker_count = min(workers, max(1, max_passes - 1))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            remaining_runs = iter(executor.map(run_pass, pass_indices))
+            ordered_runs = [first, *remaining_runs]
+
+        for pass_index, run in enumerate(ordered_runs, start=1):
             if pass_index == 1:
-                run = first
                 runtime = first_median
                 peak_rss = first_peak_rss
             else:
-                run = run_once(
-                    executable,
-                    case_index,
-                    method,
-                    seed=seed_for(case_index, pass_index),
-                    retained_schedule=retained_schedule,
-                )
                 runtime = float(run["runtime_s"])
                 peak_rss = float(run["peak_rss_mb"])
 
@@ -301,6 +341,7 @@ def main() -> int:
                         f"{max_abs_coefficient:.17g}"
                     ),
                     "reference": f"{reference:.17g}",
+                    "reference_id": first["reference_id"],
                 }
             )
 

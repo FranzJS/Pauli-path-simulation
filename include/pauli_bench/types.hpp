@@ -51,6 +51,7 @@ struct Circuit {
     double l1_cutoff{};
     double reference{};
     std::string reference_method;
+    std::string reference_id;
 };
 
 struct BfsDiagnostics {
